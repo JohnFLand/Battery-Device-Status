@@ -9,6 +9,7 @@ FEATURES:
     * Multiple notification devices supported.
     * Plain-text table for notifications (e.g., Pushover, Hubitat)
     * Last run date displayed at bottom of UI.
+    * Scan time (total and per-report breakdown) displayed next to last run timestamp after each manual refresh.
     * Configurable low battery warning and critical battery level.
     * Users can select one or more reports via checkboxes.
     * Each report has its own Sort By & Order.
@@ -20,17 +21,19 @@ FEATURES:
     * Yellow headers with default sort indicators
     * Multi-hub support: Hubs #2 and #3 queried via Maker API; remote device names include hub label for identification.
     * Optional toggle to exclude virtual devices from all reports (local and remote hubs).
+    * Manually excluded device IDs field for remote hubs allows permanent exclusion of specific devices (e.g., disabled devices not filterable via Maker API).
 */
 
 definition(
-    name: "Battery Device Status 1.31",
+    name: "Battery Device Status 1.34",
     namespace: "John Land",
     author: "John Land via ChatGPT",
     description: "Battery Device Status with battery %, offline/low battery reporting, last activity, configurable sort options, multi-hub support",
     installOnOpen: true,
     category: "Convenience",
     iconUrl: "",
-    iconX2Url: ""
+    iconX2Url: "",
+    importUrl: "https://raw.githubusercontent.com/JohnFLand/Battery-Device-Status/refs/heads/main/Battery_Device_Status.groovy"
 )
 
 preferences {
@@ -44,7 +47,7 @@ def mainPage() {
         ([2, 3].sum { hubNum ->
             settings["hub${hubNum}Enabled"] ? normalizeRemoteSelectionList(settings["hub${hubNum}SelectedDevices"]).size() : 0
         } ?: 0)
-    def pageTitle = "Battery Device Status (${totalDevCount} device${totalDevCount == 1 ? '' : 's'} selected)"
+    def pageTitle = "<b>${app.name}</b> (${totalDevCount} device${totalDevCount == 1 ? '' : 's'} selected)"
 
     dynamicPage(name: "mainPage", title: pageTitle, uninstall: true, install: true) {
 
@@ -202,7 +205,6 @@ def mainPage() {
 
         // ── Notification Settings ─────────────────────────────────────────────
 		def noticeLabel = noticeSound  ? (noticeSound instanceof Collection  ? noticeSound*.displayName  : [noticeSound.displayName])  : "Select sound notification device(s)"
-        def silentLabel = noticeSilent ? (noticeSilent instanceof Collection ? noticeSilent*.displayName : [noticeSilent.displayName]) : "Select silent notification device(s)"
         def noticeTitle = "Notification Settings"
 
         if (showSectionDetails) noticeTitle += " (${noticeLabel})"
@@ -263,8 +265,8 @@ def mainPage() {
             input "showSectionDetails", "bool", title:"Show extra details in section headers?", defaultValue:true
             input "enableLogging", "bool", title:"Enable debug logging?", defaultValue:false
             input "includeNeverRecent", "bool",
-                title:"Include devices with 'Never' battery event but recent activity?",
-                description:"If enabled, devices with no battery event but recent activity (within Overdue Activity Interval) will still be shown.",
+                title:"Include devices with a 'Never' battery event in the Last Battery Event report?",
+                description:"If enabled, devices that have never reported a battery event will be shown in the Last Battery Event report.",
                 defaultValue:false
             input "excludeVirtual", "bool",
                 title:"Exclude virtual devices from all reports?",
@@ -312,7 +314,6 @@ def mainPage() {
 // Lifecycle
 def installed() { initialize() }
 def updated() {
-    unschedule()
     unsubscribe()
     initialize()
     if (enableLogging) log.debug "Battery Device Status updated with ${devs?.size() ?: 0} devices"
@@ -326,7 +327,6 @@ void initialize() {
 }
 
 void handlerX() {
-    state.lastRun = new Date().format("yyyy-MM-dd hh:mm a", location.timeZone)
     handler(sendNotifications=true)
 }
 
@@ -334,8 +334,7 @@ def appButtonHandler(btn) {
     switch (btn) {
         case "refresh":
         case "refresh2":
-            if (enableLogging) log.debug "Manual refresh requested"
-            handler(sendNotifications=false)
+            if (enableLogging) log.debug "Manual refresh requested — page re-render will run the scan"
             break
         case "sendNow":
             if (enableLogging) log.debug "Immediate report send requested"
@@ -357,20 +356,20 @@ String handler(sendNotifications=false) {
     def selectedReports = (reportTables ?: allReportTypes).findAll { allReportTypes.contains(it) }
     if (!selectedReports) selectedReports = allReportTypes
     def reportLabels = [
-        "battery":"Last Battery Event",
-        "any":"Last Event (any type)",
-        "offline":"Offline Devices",
-        "low":"Low Battery Devices",
-        "activity":"Last Activity"
+        "battery":"<b>Last Battery Event</b>",
+        "any":"<b>Last Event (any type)</b>",
+        "offline":"<b>Offline Devices</b>",
+        "low":"<b>Low Battery Devices</b>",
+        "activity":"<b>Last Activity</b>"
     ]
 
     // --- Generate all reports, recording per-report elapsed time ---
     def reportTimings = [:]
     def results = selectedReports.collectEntries { type ->
         def t0 = new Date().time
-        def report = (type == "low") ? generateLowBatteryTable(sendNotifications, type) :
-                     (type == "activity") ? generateActivityTable(sendNotifications, type) :
-                     generateReport(type, sendNotifications)
+        def report = (type == "low") ? generateLowBatteryTable(type) :
+                     (type == "activity") ? generateActivityTable(type) :
+                     generateReport(type)
         reportTimings[type] = new Date().time - t0
         [(type): [label: reportLabels[type], html: report.html, plain: report.plain]]
     }
@@ -435,35 +434,27 @@ String handler(sendNotifications=false) {
             rows.sort((a, b) => {
                 const aCell = a.querySelectorAll('td')[columnIndex];
                 const bCell = b.querySelectorAll('td')[columnIndex];
-                let aText = aCell ? aCell.textContent.trim() : '';
-                let bText = bCell ? bCell.textContent.trim() : '';
-                
-                // Handle [Never] specially - always sort to end
-                const aNever = aText.includes('[Never]');
-                const bNever = bText.includes('[Never]');
-                
-                if (aNever && !bNever) return 1;
-                if (!aNever && bNever) return -1;
-                if (aNever && bNever) return 0;
-                
+
+                // Prefer data-sort attribute (epoch ms for dates, raw value for others);
+                // fall back to textContent for columns without it (e.g. device name, battery %)
+                let aRaw = aCell ? (aCell.getAttribute('data-sort') || aCell.textContent.trim()) : '';
+                let bRaw = bCell ? (bCell.getAttribute('data-sort') || bCell.textContent.trim()) : '';
+
                 // Remove % signs for battery columns
-                aText = aText.replace('%', '').trim();
-                bText = bText.replace('%', '').trim();
-                
-                // Try to parse as numbers for numeric sorting
-                const aNum = parseFloat(aText.replace(/[^0-9.-]/g, ''));
-                const bNum = parseFloat(bText.replace(/[^0-9.-]/g, ''));
-                
+                aRaw = aRaw.replace('%', '').trim();
+                bRaw = bRaw.replace('%', '').trim();
+
+                // Numeric comparison (covers epoch ms dates and battery %)
+                const aNum = parseFloat(aRaw.replace(/[^0-9.-]/g, ''));
+                const bNum = parseFloat(bRaw.replace(/[^0-9.-]/g, ''));
+
                 let comparison = 0;
-                
                 if (!isNaN(aNum) && !isNaN(bNum)) {
-                    // Numeric comparison
                     comparison = aNum - bNum;
                 } else {
-                    // String comparison (case-insensitive)
-                    comparison = aText.toLowerCase().localeCompare(bText.toLowerCase());
+                    comparison = aRaw.toLowerCase().localeCompare(bRaw.toLowerCase());
                 }
-                
+
                 return newDirection === 'asc' ? comparison : -comparison;
             });
             
@@ -501,23 +492,26 @@ String handler(sendNotifications=false) {
         def soundDevices = noticeSound ? (noticeSound instanceof Collection ? noticeSound : [noticeSound]) : []
         def silentDevices = noticeSilent ? (noticeSilent instanceof Collection ? noticeSilent : [noticeSilent]) : []
 
-        // Build notification queue
+        // Build notification queue: pre-filter to reports with content so idx==0 reliably
+        // identifies the first report actually sent (gets sound); rest get silent.
+        // Avoids closure mutation of a boolean flag, which is unreliable in Hubitat's sandbox.
         def queue = []
-        allReportTypes.eachWithIndex { type, idx ->
+        def reportsWithContent = allReportTypes.findAll { results[it]?.plain?.trim() }
+        if (enableLogging) log.debug "Notification routing: ${reportsWithContent.size()} report(s) with content: ${reportsWithContent}"
+        reportsWithContent.eachWithIndex { type, idx ->
             def res = results[type]
-            if (!res?.plain?.trim()) return
-
-            def targets = (idx == 0) ? soundDevices : silentDevices
+            def targets = (idx == 0 && soundDevices) ? soundDevices : silentDevices
+            if (enableLogging) log.debug "Report '${type}' (idx=${idx}) → ${idx == 0 ? 'soundDevices' : 'silentDevices'} (${targets?.size() ?: 0} device(s))"
             if (!targets) return
-
+            def plainLabel = res.label.replaceAll(/<[^>]+>/, '')
             targets.each { dev ->
-                queue << [deviceId: dev.id, msg: "=== ${res.label} ===\n${res.plain.trim()}"]
+                queue << [deviceId: dev.id, msg: "=== ${plainLabel} ===\n${res.plain.trim()}"]
             }
         }
 
-        // Schedule each message with a 5-second stagger
+        // Schedule each message with a 5-second stagger; minimum 1 second (runIn(0,...) is unreliable)
         queue.eachWithIndex { item, idx ->
-            runIn(idx * 5, "sendDelayedNotification", [
+            runIn((idx * 5) + 1, "sendDelayedNotification", [
                 overwrite: false,
                 data: item
             ])
@@ -533,9 +527,10 @@ void sendDelayedNotification(Map data) {
     def msg = data.msg
     if (!deviceId || !msg) return
 
-    // Look up device dynamically
-    def device = (noticeSound instanceof Collection ? noticeSound : [noticeSound]).find { it.id == deviceId } ?:
-                 (noticeSilent instanceof Collection ? noticeSilent : [noticeSilent]).find { it.id == deviceId }
+    // Guard against null settings before wrapping in a list
+    def soundList  = noticeSound  ? (noticeSound  instanceof Collection ? noticeSound  : [noticeSound])  : []
+    def silentList = noticeSilent ? (noticeSilent instanceof Collection ? noticeSilent : [noticeSilent]) : []
+    def device = soundList.find { it?.id == deviceId } ?: silentList.find { it?.id == deviceId }
 
     if (!device) {
         log.warn "Device not found for ID ${deviceId}"
@@ -552,7 +547,7 @@ void sendDelayedNotification(Map data) {
 
 
 // Report Generator (last event/battery/offline/any)
-private Map generateReport(String type, boolean noteMode) {
+private Map generateReport(String type) {
     def sortByVal = settings["sortBy_${type}"] ?: ((type=="offline") ? "displayName" : "lastStr")
     def sortOrderVal = settings["sortOrder_${type}"] ?: "asc"
 
@@ -658,12 +653,6 @@ private Map generateReport(String type, boolean noteMode) {
 
 		// Case 2: device has NEVER reported (lastDate == null)
 		if (it.lastDate == null) {
-			// Resolve lastActivity: use device method for local devices, cached value for remote
-			def lastAct = it.device ? it.device.getLastActivity() : it.lastActivity
-			def nowMs = new Date().time
-			def thresholdMs = ((activityIntervalHours ?: 24) * 60 * 60 * 1000)
-			def recentAct = lastAct && ((nowMs - lastAct.time) <= thresholdMs)
-
 			if (includeNeverRecentFlag) {
 				return true   // show all [Never] devices (for battery/any reports)
 			} else {
@@ -698,15 +687,11 @@ private Map generateReport(String type, boolean noteMode) {
     }
     if (sortOrderVal == "desc") normalList = normalList.reverse()
 
-    reportList = neverList + normalList
+    // [Never] group always last — matches the JS click-sort behavior
+    reportList = normalList + neverList
 
-    // Compute total checked (local + remote)
-    def totalChecked = selectedEnabledDevices.size()
-    [2, 3].each { hubNum ->
-        if (settings["hub${hubNum}Enabled"]) {
-            totalChecked += normalizeRemoteSelectionList(settings["hub${hubNum}SelectedDevices"]).size()
-        }
-    }
+    // Compute total checked (local + remote, remote excludes manually excluded IDs)
+    def totalChecked = selectedEnabledDevices.size() + effectiveRemoteDeviceCount(2) + effectiveRemoteDeviceCount(3)
     def notReportedCount = reportList.size()
 
     // Update header text based on report type
@@ -759,7 +744,7 @@ private Map generateReport(String type, boolean noteMode) {
             def devName = it.device ? it.device.displayName : it.displayName
             def devLink = it.device ? "/device/edit/${it.device.id}" : it.linkUrl
             tableHtml += "<tr>"
-            tableHtml += "<td>${it.lastStrUI}</td><td>${it.level}%</td><td><a href='${devLink}' target='_blank'>${devName}</a></td>"
+            tableHtml += "<td data-sort='${it.lastDate?.time ?: 99999999999999}'>${it.lastStrUI}</td><td>${it.level}%</td><td><a href='${devLink}' target='_blank'>${devName}</a></td>"
             if (type=="any") tableHtml += "<td>${it.lastEventStr}</td>"
             tableHtml += "<td>${it.hubLabel ?: ''}</td>"
             tableHtml += "</tr>"
@@ -792,7 +777,7 @@ private Map generateReport(String type, boolean noteMode) {
 }
 
 // Low Battery Table
-private Map generateLowBatteryTable(boolean noteMode, String type = "low") {
+private Map generateLowBatteryTable(String type = "low") {
     def excludeVirt = settings["excludeVirtual"] ?: false
     def selectedEnabledDevices = (devs ?: []).findAll { !it.isDisabled() &&
         !(excludeVirt && (it.typeName?.toLowerCase()?.contains("virtual") || it.displayName?.startsWith("VD ")))
@@ -801,8 +786,7 @@ private Map generateLowBatteryTable(boolean noteMode, String type = "low") {
     def lowList = selectedEnabledDevices ? selectedEnabledDevices.collect { dev ->
         def level = dev.currentBattery
         if (level != null && level <= lowBatteryLevel) {
-            def critical = (level <= criticalBatteryLevel)
-            [device:dev, displayName:dev.displayName, linkUrl:"/device/edit/${dev.id}", hubLabel:(settings["hub1Label"] ?: (location.name ?: "Hub 1")), level:level, critical:critical]
+            [device:dev, displayName:dev.displayName, linkUrl:"/device/edit/${dev.id}", hubLabel:(settings["hub1Label"] ?: (location.name ?: "Hub 1")), level:level]
         }
     }.findAll{ it != null } : []
 
@@ -846,15 +830,10 @@ private Map generateLowBatteryTable(boolean noteMode, String type = "low") {
         }
     }
 
-    // Compute total checked (local + remote)
-    def totalChecked = selectedEnabledDevices.size()
-    [2, 3].each { hubNum ->
-        if (settings["hub${hubNum}Enabled"]) {
-            totalChecked += normalizeRemoteSelectionList(settings["hub${hubNum}SelectedDevices"]).size()
-        }
-    }
-    def lowCount = lowList.size()
-    def summaryText = "${lowCount} of ${totalChecked} selected devices report having low battery levels."
+    // Compute total checked (local + remote, remote excludes manually excluded IDs)
+    def totalChecked = selectedEnabledDevices.size() + effectiveRemoteDeviceCount(2) + effectiveRemoteDeviceCount(3)
+    def lowCount     = lowList.size()
+    def summaryText  = "${lowCount} of ${totalChecked} selected devices report having low battery levels."
 
     // Determine which column gets the default sort indicator
     def sortColIndex = (sortByVal == "level") ? 0 : 1
@@ -888,7 +867,7 @@ private Map generateLowBatteryTable(boolean noteMode, String type = "low") {
 }
 
 // Last Activity Table
-private Map generateActivityTable(boolean noteMode, String type = "activity") {
+private Map generateActivityTable(String type = "activity") {
     def sortByVal = settings["sortBy_activity"] ?: "lastActivity"
     def sortOrderVal = settings["sortOrder_activity"] ?: "desc"
     def activityThresholdHours = (settings["activityIntervalHours"] ?: 24) as int
@@ -949,16 +928,11 @@ private Map generateActivityTable(boolean noteMode, String type = "activity") {
 	}
 	if (sortOrderVal == "desc") normalList = normalList.reverse()
 
-	// Combine: [Never] group always first
-	reportList = neverList + normalList
+	// [Never] group always last — matches the JS click-sort behavior
+	reportList = normalList + neverList
 
-    // Compute total checked (local + remote)
-    def totalChecked = selectedEnabledDevices.size()
-    [2, 3].each { hubNum ->
-        if (settings["hub${hubNum}Enabled"]) {
-            totalChecked += normalizeRemoteSelectionList(settings["hub${hubNum}SelectedDevices"]).size()
-        }
-    }
+    // Compute total checked (local + remote, remote excludes manually excluded IDs)
+    def totalChecked = selectedEnabledDevices.size() + effectiveRemoteDeviceCount(2) + effectiveRemoteDeviceCount(3)
     def overdueCount = reportList.size()
     def summaryText = (overdueCount > 0) ?
         "${overdueCount} of ${totalChecked} selected devices have overdue activity." :
@@ -986,7 +960,7 @@ private Map generateActivityTable(boolean noteMode, String type = "activity") {
             def devName = it.device ? it.device.displayName : it.displayName
             def devLink = it.device ? "/device/edit/${it.device.id}" : it.linkUrl
             tableHtml += "<tr>"
-            tableHtml += "<td style='border:1px solid black;'>${it.lastStrUI}</td>"
+            tableHtml += "<td style='border:1px solid black;' data-sort='${it.lastActivity?.time ?: 99999999999999}'>${it.lastStrUI}</td>"
             tableHtml += "<td style='border:1px solid black;'>${it.level}%</td>"
             tableHtml += "<td style='border:1px solid black;'><a href='${devLink}' target='_blank'>${devName}</a></td>"
             tableHtml += "<td style='border:1px solid black;'>${it.hubLabel ?: ''}</td>"
@@ -1008,36 +982,6 @@ private Map generateActivityTable(boolean noteMode, String type = "activity") {
     return [label:"Last Activity", html: tableHtml, plain: plainMsg]
 }
 
-// Shared sort helper to keep "[Never]" grouped first and alphabetically
-private List sortWithNeverGrouping(List reportList, String sortByVal, String sortOrderVal, boolean activityMode=false) {
-    def sorted = reportList.sort { it ->
-        def never = activityMode ? (it.lastActivity == null) : (it.lastDate == null)
-        def tier = never ? 0 : 1
-        def secondary = never ? (it.device ? it.device.displayName : it.displayName).toLowerCase() : null
-        def sortKey
-        switch(sortByVal) {
-            case "displayName": sortKey = (it.device ? it.device.displayName : it.displayName).toLowerCase(); break
-            case "lastActivity":
-                sortKey = it.lastActivity ?: new Date(0)
-                break
-            case "lastStr":
-                sortKey = it.lastDate ?: new Date(0)
-                break
-            case "level":
-                sortKey = (it.level.toString().trim().isNumber() ? it.level.toString().trim().toInteger() : -1)
-                break
-            case "lastEventStr":
-                sortKey = it.lastEventStr?.toLowerCase() ?: ""
-                break
-            default:
-                sortKey = activityMode ? (it.lastActivity ?: new Date(0)) : (it.lastDate ?: new Date(0))
-        }
-        return [tier, secondary, sortKey]
-    }
-    if (sortOrderVal == "desc") sorted = sorted.reverse()
-    return sorted
-}
-
 
 // ─────────────────────────────────────────────────────────────────────────────
 // REMOTE HUB HELPERS
@@ -1046,6 +990,15 @@ private List sortWithNeverGrouping(List reportList, String sortByVal, String sor
 // Returns true if at least one remote hub is enabled (used to avoid early-return on empty local devs)
 private boolean hasAnyRemoteHubEnabled() {
     return (settings["hub2Enabled"] || settings["hub3Enabled"])
+}
+
+// Count of selected remote devices on a hub AFTER applying manual exclusions,
+// so totalChecked denominators match what the report actually evaluates.
+private int effectiveRemoteDeviceCount(int hubNum) {
+    if (!settings["hub${hubNum}Enabled"]) return 0
+    def selIds  = normalizeRemoteSelectionList(settings["hub${hubNum}SelectedDevices"])
+    def exclIds = (settings["hub${hubNum}ExcludeIds"] ?: "").split(",").collect { it.trim() }.findAll { it } as Set
+    return selIds.count { !exclIds.contains(it) } as int
 }
 
 // Normalise a multi-select setting into a List<String>
@@ -1085,8 +1038,8 @@ private void loadRemoteBatteryDeviceList(int hubNum, String ip, String appId, St
             }
         }
         state["hub${hubNum}BatteryDevices"] = batteryList
-        state["hub${hubNum}LoadStatus"] = "OK: ${batteryList.size()} battery device${batteryList.size() == 1 ? '' : 's'} loaded"
-        log.info "${hubLabel}: Loaded ${batteryList.size()} battery device(s) for monitoring."
+        state["hub${hubNum}LoadStatus"] = "OK: ${batteryList.size()} device${batteryList.size() == 1 ? '' : 's'} loaded (non-battery devices filtered during report generation)"
+        log.info "${hubLabel}: Loaded ${batteryList.size()} device(s) for monitoring."
     } catch (Exception e) {
         log.error "${hubLabel}: Error loading device list — ${e.message}"
         state["hub${hubNum}BatteryDevices"] = []
@@ -1304,14 +1257,12 @@ private List fetchRemoteLowBatteryRows(int hubNum) {
                 def level = (rawBatt != null && rawBatt.toString().isNumber()) ? rawBatt.toDouble() : null
 
                 if (level != null && level <= lowBatteryLevel) {
-                    def critical = (level <= criticalBatteryLevel)
                     results << [
                         device     : null,
                         displayName: displayName,
                         hubLabel   : hubLabel,
                         linkUrl    : "http://${ip}/device/edit/${devId}",
-                        level      : level,
-                        critical   : critical
+                        level      : level
                     ]
                 }
             }
