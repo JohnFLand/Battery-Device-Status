@@ -1,7 +1,6 @@
-[Battery Device Status User Guide 2026-05-03.md](https://github.com/user-attachments/files/27380762/Battery.Device.Status.User.Guide.2026-05-03.md)
 # Battery Device Status — User Guide
 
-**App version:** 1.28  
+**App version:** 1.32  
 **Applies to:** Hubitat Elevation, same-LAN multi-hub deployments
 
 ---
@@ -58,7 +57,7 @@ The app page is divided into two zones:
 - **Send Report Now** button — triggers an immediate notification send to configured devices
 - The selected report tables (Offline, Low Battery, Last Battery Event, Last Event, Last Activity)
 - **Refresh Table** button repeated at the bottom of the reports for convenience
-- *Last run* timestamp
+- *Last run* timestamp and scan time — after each manual refresh, the elapsed time for the full scan is shown next to the timestamp, broken down by report type (e.g. *Scan time: 0:03 [Battery:0.8s, Any:0.6s, Offline:0.1s, Low:0.2s, Activity:1.1s]*). Scan time is not shown after a scheduled run, only after a manual Refresh.
 
 **Bottom — collapsed configuration sections**
 - Hub #1, Hub #2, Hub #3 device selection (each collapsible)
