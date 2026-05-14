@@ -1,4 +1,6 @@
 /*
+Battery Device Status
+
 PURPOSE: Check the state of battery based devices
 FEATURES:
     * Shows only devices that report a "battery" capability.
@@ -25,15 +27,15 @@ FEATURES:
 */
 
 definition(
-    name: "Battery Device Status 1.34",
-    namespace: "John Land",
-    author: "John Land via ChatGPT",
-    description: "Battery Device Status with battery %, offline/low battery reporting, last activity, configurable sort options, multi-hub support",
+    name:          "Battery Device Status 1.34",
+    namespace:     "John Land",
+    author:        "John Land via ChatGPT",
+    description:   "Battery Device Status with battery %, offline/low battery reporting, last activity, configurable sort options, multi-hub support",
     installOnOpen: true,
-    category: "Convenience",
-    iconUrl: "",
-    iconX2Url: "",
-    importUrl: "https://raw.githubusercontent.com/JohnFLand/Battery-Device-Status/refs/heads/main/Battery_Device_Status.groovy"
+    category:      "Convenience",
+    iconUrl:       "",
+    iconX2Url:     "",
+    importUrl:     "https://raw.githubusercontent.com/JohnFLand/Battery-Device-Status/refs/heads/main/Battery_Device_Status.groovy"
 )
 
 preferences {
