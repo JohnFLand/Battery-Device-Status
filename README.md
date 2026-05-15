@@ -1,32 +1,33 @@
-# Device State Monitor Multi-Hub — User Guide
+# Battery Device Status — User Guide
 
-**App version:** 1.43  
+**App version:** 1.35  
 **Applies to:** Hubitat Elevation, same-LAN multi-hub deployments
 
 ---
 
 ## Overview
 
-Device State Monitor Multi-Hub reports device states across up to three Hubitat hubs from a single app page. It provides four live tables:
+Battery Device Status monitors battery-capable devices across up to three Hubitat hubs from a single app page. It provides up to five selectable report tables:
 
-- **ON Devices** — switch-capable devices currently reporting ON
-- **OFF Devices** — switch-capable devices currently reporting OFF
-- **Unknown State** — switch-capable devices reporting neither ON nor OFF
-- **Health / Activity Monitor** — any device (switch or otherwise) that is OFFLINE, INACTIVE, NOT PRESENT, or whose last activity exceeds a configurable time threshold
+- **Offline Devices** — battery devices currently reporting OFFLINE, INACTIVE, or NOT PRESENT
+- **Low Battery Devices** — devices whose battery level is at or below the configured warning threshold
+- **Last Battery Event** — devices that have not reported a battery event within the configured interval
+- **Last Event (any type)** — devices that have not reported any event within the configured interval
+- **Last Activity** — devices whose last recorded activity exceeds the configured interval
 
-Device names are clickable links to their hub's device edit page. When Maker API credentials are configured, the State cell in the ON and OFF tables is clickable to toggle the device without leaving the page.
+Device names are clickable links to their hub's device edit page. All tables support interactive column sorting by clicking the yellow table headers. Reports can be sent as push notifications (via Pushover or any Hubitat notification device) on a daily schedule or on demand.
 
 ---
 
 ## Setting Up Maker API on a Remote Hub
 
-Hubs #2 and #3 are queried via Hubitat's built-in **Maker API** app. Perform these steps on each remote hub before configuring it in Device State Monitor.
+Hubs #2 and #3 are queried via Hubitat's built-in **Maker API** app. Perform these steps on each remote hub before configuring it in Battery Device Status.
 
 ### Step 1 — Install Maker API on the remote hub
 
 1. On the remote hub, go to **Apps** → **+ Add Built-In App**.
 2. Find **Maker API** and install it.
-3. Open the Maker API app. Under **Allow Access to Devices**, select every device you want to be reachable from Device State Monitor — this includes devices you want to monitor for ON/OFF state and any you want in the Health/Activity table. Only devices selected here will be visible to the app.
+3. Open the Maker API app. Under **Allow Access to Devices**, select every battery device you want Battery Device Status to monitor. Only devices selected here will be visible to the app.
 4. Note the **App ID** shown in the Maker API page heading (e.g. *Maker API — App # 42*). You will need this number.
 5. Copy the **Access Token** shown on the same page.
 6. Note the hub's **local IP address** (visible in Hubitat's **Settings → Hub Details**, or in your router's DHCP table).
@@ -41,9 +42,9 @@ http://<hub-ip>/apps/api/<app-id>/devices?access_token=<token>
 
 You should see a JSON list of your selected devices. If the page loads, the credentials are correct.
 
-### Step 3 — Enter credentials in Device State Monitor
+### Step 3 — Enter credentials in Battery Device Status
 
-Open the Hub #2 (or #3) section in Device State Monitor, enable the hub, expand **Show / Edit Connection Settings**, and enter the IP address, App ID, and Access Token you noted above. Then choose **⟳ Load / Reload Device List** from the Actions dropdown to fetch the device list.
+Open the Hub #2 (or #3) section in Battery Device Status, enable the hub, expand **Show / Edit Connection Settings**, and enter the IP address, App ID, and Access Token you noted above. Then choose **⟳ Load / Reload Device List** from the Actions dropdown to fetch the device list.
 
 ---
 
@@ -53,13 +54,16 @@ The app page is divided into two zones:
 
 **Top — live report area**
 - **Refresh Table** button — re-queries all hubs immediately and redraws all tables
-- The four report tables (ON, OFF, Unknown, Health/Activity)
-- *Last run* timestamp
+- **Send Report Now** button — triggers an immediate notification send to configured devices
+- The selected report tables (Offline, Low Battery, Last Battery Event, Last Event, Last Activity)
+- **Refresh Table** button repeated at the bottom of the reports for convenience
+- *Last run* timestamp and scan time — after each manual refresh, the elapsed time for the full scan is shown next to the timestamp, broken down by report type (e.g. *Scan time: 0:03 [Battery:0.8s, Any:0.6s, Offline:0.1s, Low:0.2s, Activity:1.1s]*). Scan time is not shown after a scheduled run, only after a manual Refresh.
 
 **Bottom — collapsed configuration sections**
-- Hub #1, Hub #2, Hub #3 settings (each collapsible)
-- Sort & Display Options (sort defaults, Hide Columns, filtering, display preferences)
-- Notes / User Guide (condensed in-app reference)
+- Hub #1, Hub #2, Hub #3 device selection (each collapsible)
+- Notification Settings
+- Report Type, Schedule & Logging
+- Sort Options
 
 Configuration sections are hidden by default once set up, so the report tables are the first thing you see on every visit.
 
@@ -67,16 +71,12 @@ Configuration sections are hidden by default once set up, so the report tables a
 
 ## Hub #1 — Local Hub
 
-Hub #1 is the hub running Device State Monitor. Its devices are accessed directly — no network calls are required.
+Hub #1 is the hub running Battery Device Status. Its devices are accessed directly — no network calls are required.
 
 | Control | Purpose |
 |---|---|
 | **Friendly label** | Name shown in the Hub column of all tables. Defaults to the hub's location name. |
-| **Select ON-monitored devices** | Devices that appear in the ON table when their switch state is on. Accepts any switch-capable device. |
-| **Select OFF-monitored devices** | Devices that appear in the OFF table when their switch state is off. A device may be selected in both lists. |
-| **Toggle Command & Health Monitor Settings** | Toggle to reveal Maker API credentials for Hub #1. These are used for two purposes: (1) clickable State cells in the ON/OFF tables and embedded toggle buttons in the Unknown table; (2) the Load / Select All / Clear All actions in the health device picker. If left blank, State cells are non-interactive and health selection reverts to a manual capability picker. |
-| **Hub #1 Health Device List Actions** | Appears once Maker API credentials are entered. Choose **⟳ Load / Reload** to fetch the device list, then **✓ Select All** or **✗ Clear** to bulk-manage health selections. |
-| **Select health/activity-monitored devices** | The capability picker — always visible. Devices selected here appear in the Health/Activity table when flagged. Disabled devices are automatically excluded. |
+| **Select devices** | Accepts any device with the `battery` capability. Disabled devices are automatically excluded even if selected. |
 
 ---
 
@@ -86,17 +86,17 @@ Remote hubs are queried via their Maker API on every Refresh.
 
 ### Enabling a remote hub
 
-Toggle **Enable Hub #2?** (or #3) to on. The connection settings expand automatically.
+Toggle **Enable Hub #2?** (or #3) to on. The configuration controls expand automatically.
 
 ### Connection Settings
 
 | Control | Purpose |
 |---|---|
-| **Show / Edit Connection Settings** | Toggle to reveal or hide the IP, App ID, and Token fields. Collapse it once configured to keep the section tidy. |
+| **Show / Edit Connection Settings** | Toggle to reveal or hide the IP, App ID, and Token fields. Collapse once configured to keep the section tidy. |
 | **Hub IP address** | Local LAN IP of the remote hub (e.g. 192.168.1.100). |
 | **Maker API app ID** | The number shown in the Maker API app heading on the remote hub. |
 | **Maker API access token** | The token from the Maker API app on the remote hub. |
-| **Last load status** | Shown in green (OK) or red (error) after a Load/Reload action. Displays counts of switch devices loaded, enabled devices, and disabled devices detected. |
+| **Last load status** | Shown in green (OK) or red (error) after a Load/Reload action. Displays counts of battery devices loaded. |
 
 ### Actions Dropdown
 
@@ -104,166 +104,168 @@ All bulk device management for remote hubs is done through the **Actions** dropd
 
 | Action | Effect |
 |---|---|
-| **⟳ Load / Reload Device List** | Fetches the current device list from the remote hub's Maker API. Must be run before device pickers appear. Re-run whenever devices are added to or removed from the Maker API app on the remote hub. |
-| **✓ Select All ON-monitored devices** | Selects all switch-capable devices for ON monitoring. |
-| **✗ Clear ON-monitored devices** | Removes all ON monitoring selections. |
-| **✓ Select All OFF-monitored devices** | Selects all switch-capable devices for OFF monitoring. |
-| **✗ Clear OFF-monitored devices** | Removes all OFF monitoring selections. |
-| **✓ Select All health-monitored devices** | Selects all devices (switch and non-switch) for health/activity monitoring. |
-| **✗ Clear health-monitored devices** | Removes all health monitoring selections. |
+| **⟳ Load / Reload Device List** | Fetches the current device list from the remote hub's Maker API. Must be run before the device picker appears. Re-run whenever devices are added to or removed from the Maker API app on the remote hub. |
+| **✓ Select All battery devices** | Selects all battery-capable devices returned by the load. |
+| **✗ Clear all selected devices** | Removes all current selections for that hub. |
 
-### Device Pickers
+### Device Picker
 
-After loading, three pickers appear:
-
-**Switch Device Selection** — shows only switch-capable devices. Use the **Filter by name or room** field to narrow a long list. The ON-monitored and OFF-monitored pickers each show the count of devices available in the loaded list.
-
-**Health / Activity device selector** — shows all devices exposed to the Maker API, not just switch-capable ones, so you can monitor sensors, remotes, and other non-switch devices for activity.
+After loading, a device picker appears showing all battery-capable devices returned by the Maker API, along with a count of available devices (e.g. *Battery devices to monitor on Hub #2 (14 available)*).
 
 ### Disabled Devices on Remote Hubs
 
-The Health/Activity table makes a best-effort attempt to exclude disabled devices automatically: on every Refresh it cross-checks selected device IDs against the hub's live device list and skips any ID that no longer appears there (disabled devices typically drop off that list). IDs flagged as disabled during the last Load/Reload are also cached and excluded at refresh time.
+Hubitat's Maker API does not expose disabled state reliably, so disabled devices cannot be filtered automatically on remote hubs. If a disabled device appears in reports, the recommended remedies in order of preference are:
 
-This filtering covers most cases, but is not guaranteed — the Maker API does not expose disabled state reliably in all Hubitat versions. If a disabled device still appears in the Health/Activity table, the fallback remedies in order of preference are:
-
-1. **Deselect it** from the health device picker — the cleanest ongoing solution.
-2. **Enter its device ID** in the **Manually excluded health-monitor device IDs** field — the device is then permanently excluded from the health table regardless of its state. The device ID is the number in its edit URL: `/device/edit/169`.
-
-Note that the exclusion field applies only to the Health/Activity table, not the ON/OFF/Unknown tables.
+1. **Deselect it** from the device picker — the cleanest ongoing solution.
+2. **Enter its device ID** in the **Manually excluded device IDs** field — the device is then permanently excluded from all reports for that hub regardless of its state. The device ID is the number in its edit URL: `/device/edit/169`. Multiple IDs are entered comma-separated.
 
 ---
 
 ## Report Tables
 
-### ON Devices Table
+### Offline Devices
 
-Lists every monitored device currently reporting switch state **on**. Devices also selected in the OFF-monitored list are highlighted with a gold star (★) and orange-colored name, indicating they are being watched in both directions.
+Lists every monitored battery device whose Hubitat status is **OFFLINE**, **INACTIVE**, or **NOT PRESENT**, or whose `healthStatus` attribute reports offline. The summary line shows how many of the total selected devices are currently offline.
 
-When Maker API credentials are configured, the State cell (showing **ON**) is clickable. Click it to send an **off** command; the cell updates in-place without a full page refresh.
+Columns: **Battery %**, **Device Name**, **Hub** *(omitted if Hide Hub column is enabled)*
 
-### OFF Devices Table
+### Low Battery Devices
 
-Lists every monitored device currently reporting switch state **off**. Same dual-monitoring highlight applies.
+Lists every monitored device whose current battery level is at or below the **Low battery warning level** threshold. Devices at or below the **Critically low battery level** threshold are displayed in red.
 
-Click the State cell (showing **OFF**) to send an **on** command.
+Columns: **Battery %**, **Device Name**, **Hub** *(omitted if Hide Hub column is enabled)*
 
-### Unknown State Table
+The summary line reports how many of the total selected devices currently show a low battery level.
 
-Lists monitored devices reporting a switch state other than on or off (e.g. null, initializing, or an unrecognized value). Can be hidden in Sort & Display Options. When Maker API credentials are configured, the State cell contains **→ ON** and **→ OFF** mini-buttons to send either command.
+### Last Battery Event
 
-### Health / Activity Monitor Table
+Lists devices that have not reported a `battery` attribute event within the configured **Overdue battery event interval**. The app first checks for a `lastBatteryReport` attribute on the device driver; if not present, it searches the event log.
 
-Lists any health-monitored device that meets one or more of:
+Devices that have never reported a battery event are handled according to the **Include devices with 'Never' battery event but recent activity?** setting — see [Report Type, Schedule & Logging](#report-type-schedule--logging).
 
-| HE Status | Meaning |
-|---|---|
-| **OFFLINE** | Hub reports device is offline |
-| **INACTIVE** | Hub reports device is inactive |
-| **NOT PRESENT** | Hub reports device is not present (typically for presence sensors) |
-| **HEALTH OFFLINE** | Device's `healthStatus` attribute reports offline (shown when HE status itself is absent) |
-| **Late Activity (>Xh)** | Last recorded device activity is older than the configured threshold |
+Columns: **Last Battery Event Time**, **Battery %**, **Device Name**, **Hub** *(omitted if Hide Hub column is enabled)*
 
-The **Issue** column may contain multiple reasons separated by commas if more than one condition applies.
+### Last Event (any type)
 
-For child devices (e.g. individual endpoints of a USB switch hub), last activity is resolved from the parent device if the child has no activity record of its own.
+Lists devices that have not reported any event within the configured **Overdue event interval**. The most recent event name and value are shown in the Event Description column.
 
----
+Columns: **Last Event Time**, **Battery %**, **Device Name**, **Event Description**, **Hub** *(omitted if Hide Hub column is enabled)*
 
-## Clickable State Cells
+### Last Activity
 
-State cells are interactive in the ON, OFF, and Unknown tables when Maker API credentials are configured for the relevant hub. They work as follows:
+Lists devices whose last recorded activity is older than the configured **Overdue activity interval**. Activity timestamps are shown in red. Devices with no activity on record are shown as **[Never]** and sorted to the end of the table.
 
-- **ON / OFF tables:** the entire State cell is a click target. Hover over it to see a subtle highlight; the cursor changes to a pointer. Click to send the opposite command.
-- **Unknown table:** the State cell contains **→ ON** and **→ OFF** mini-buttons since neither direction can be inferred.
-- The command is sent via the Maker API using `fetch()` — the page does not reload.
-- The cell (or button) shows **…** while the command is in flight.
-- On success, the State cell's label and color update immediately (optimistic update).
-- On failure (network error or non-200 HTTP status), a brief error indicator appears and the original state is restored.
-
-State cells are not interactive in the Health/Activity table — that table is for monitoring only.
+Columns: **Last Activity Time**, **Battery %**, **Device Name**, **Hub** *(omitted if Hide Hub column is enabled)*
 
 ---
 
-## Sort & Display Options
+## Interactive Table Sorting
 
-Expand the **Sort & Display Options** section at the bottom of the page to configure default sort behaviour, filtering, and display preferences.
+All report tables have **yellow column headers** that can be clicked to re-sort the table:
 
-### App Name
+- Click a header once to sort ascending (▲ indicator appears).
+- Click the same header again to sort descending (▼ indicator appears).
+- **[Never]** entries are always sorted to the end of the table regardless of sort direction.
+- Interactive sorting is temporary and does not change the saved default sort. The default sort (used for notifications and on page load) is configured in the [Sort Options](#sort-options) section.
 
-A **Rename this app** field appears at the top of the section. Enter a custom label to distinguish this instance from others (the label is shown in the Hubitat Apps list).
+---
 
-### Per-Table Sort Settings
+## Notification Settings
 
-Each table has independent **Sort by** and **Order** controls. The sort applied here is the default when the page first loads. Click any column header in a table to re-sort interactively; this does not change the saved default.
+Battery Device Status sends plain-text reports to any Hubitat notification-capable device (typically Pushover).
 
-**ON / OFF tables:** sortable by Device Name, Room, or Hub.  
-**Unknown State table:** same columns.  
-**Health / Activity table:** sortable by Device Name, Room, Hub, HE Status, or Last Activity.
-
-### Show/Hide Tables
-
-| Control | Effect |
+| Control | Purpose |
 |---|---|
-| **Show Unknown State table?** | Hides or shows the Unknown table. Default: on. |
-| **Show Health/Activity Monitor table?** | Hides or shows the Health table. Default: on. |
+| **Sound notification device(s)** | Receives the **first** report in the notification queue with a sound alert. Select one or more Pushover devices configured with an audible notification tone. |
+| **Silent notification device(s)** | Receives all **remaining** reports (second through fifth) with no alert sound. Select one or more Pushover devices configured with a silent/none notification tone. |
 
-### Activity Threshold
+When a scheduled or on-demand send is triggered, each selected report generates one notification message. Messages are staggered 5 seconds apart to avoid delivery collisions. Reports with no flagged devices produce no notification.
 
-**Flag devices with last activity more than X hours ago** — default 24 hours. Any health-monitored device whose most recent event is older than this value is flagged as Late Activity in the Health table. Set to a larger value (e.g. 72 hours) to reduce noise for devices that naturally report infrequently.
+---
 
-### Filtering Options
+## Report Type, Schedule & Logging
 
-| Control | Effect |
+Expand this section to control which reports are generated, when they run, and how thresholds are defined.
+
+### Report Selection
+
+Use the **Select which report tables to generate** picker to choose one or more of: Offline Devices, Low Battery Devices, Last Battery Event, Last Event (any type), Last Activity. Choose **Select All Reports** to enable all five at once.
+
+Only selected reports appear in the on-screen table area and are included in notifications.
+
+### Scheduling
+
+| Control | Purpose |
 |---|---|
-| **Exclude virtual devices** | Omits virtual devices from all four tables. "Virtual" is identified by driver type name containing "virtual", or device name starting with "VD " (a naming convention for virtual devices). |
-| **Exclude devices in the "System" room** | Omits devices assigned to the Hubitat room named "System" from all four tables. |
+| **Daily check time** | The time each day the app automatically runs all selected reports and sends notifications. |
 
-### Display Options
+### Thresholds
 
-| Control | Effect |
+| Control | Default | Purpose |
+|---|---|---|
+| **Low battery warning level (%)** | 80 | Devices at or below this level appear in the Low Battery table. |
+| **Critically low battery level (%)** | 60 | Devices at or below this level are highlighted in red in the Low Battery table. Must be ≤ the low battery warning level. |
+| **Overdue battery event interval (hours)** | 24 | Devices whose last battery event is older than this appear in the Last Battery Event table. |
+| **Overdue event interval (hours)** | 24 | Devices whose last event (any type) is older than this appear in the Last Event table. |
+| **Overdue activity interval (hours)** | 24 | Devices whose last activity is older than this appear in the Last Activity table. This threshold is also used to evaluate "recent activity" for the Never battery event logic below. |
+
+### Display & Behavior Options
+
+| Control | Purpose |
 |---|---|
-| **Show extra details in section headers?** | Appends monitored device counts to each hub section header (e.g. "Hub #3 – Office — 15 ON / 15 OFF / 47 Health monitored"). |
-| **Enable debug logging?** | Writes detailed log entries to the Hubitat log for each device checked during a refresh. Useful for diagnosing missing or incorrect data. Disable when not troubleshooting — it generates a large number of log entries for hubs with many selected devices. |
+| **Show extra details in section headers?** | Appends current threshold values and settings to collapsed section headers (e.g. "Report Type, Schedule & Logging (Daily Check: 08:00 AM, Overdue Event Interval: 24h…)"). Useful for reviewing settings at a glance without expanding sections. |
+| **Include devices with 'Never' battery event but recent activity?** | When enabled, devices that have never reported a battery event are included in the Last Battery Event and Last Event tables even if they have had recent activity. When disabled (default), such devices are excluded to reduce table clutter. |
+| **Exclude virtual devices from all reports?** | When enabled, omits virtual devices from all five report tables. "Virtual" is identified by driver type name containing "virtual", or device name starting with "VD " (a naming convention for virtual devices). Applies to both local and remote hub devices. |
+| **Hide the Hub column in all report tables?** | When enabled, removes the Hub column from every report table and from plain-text notification output. Recommended when only one hub is being monitored — the column adds no information in that case. Disabled by default. |
+| **Enable debug logging?** | Writes detailed log entries to the Hubitat log for each device evaluated during a refresh. Useful for diagnosing missing or incorrect data. Disable when not troubleshooting — it generates a large number of log entries for hubs with many devices. |
 
-### Hide Columns
+---
 
-Three toggle buttons at the bottom of Sort & Display Options control column visibility across all tables:
+## Sort Options
 
-| Button | Columns hidden |
+Expand the **Sort Options** section to set the default sort order for each report table. These settings also control the sort order used in notification messages.
+
+> **Note:** Click any table header in the live report area to re-sort interactively. This is temporary and does not change the saved default here.
+
+Each table has independent **Sort by** and **Order** (Ascending / Descending) controls.
+
+| Table | Sortable columns |
 |---|---|
-| **Room** | Room column in the ON, OFF, Unknown, and Health tables |
-| **Hub** | Hub column in the same four tables |
-| **Last Activity** | Last Activity column in the Health / Activity table only (button appears only when the Health table is enabled) |
+| **Offline Devices** | Device Name |
+| **Low Battery Devices** | Battery %, Device Name |
+| **Last Battery Event** | Last Battery Event Time, Device Name |
+| **Last Event (any type)** | Last Event Time, Device Name, Event Description |
+| **Last Activity** | Last Activity Time, Device Name, Battery % |
 
-Click a button to hide the column; click again to show it. The button text is struck through while the column is hidden. Visibility choices are saved in the browser's local storage and restored automatically on every subsequent page load — no Refresh or Save required.
-
-Hiding the Room, Hub, and Last Activity columns is particularly useful on narrow screens (e.g. a phone in portrait orientation), where it frees significant horizontal space for the Device Name, HE Status, and Issue columns.
-
-### Notes / User Guide
-
-A collapsible **Notes / User Guide** section appears below Sort & Display Options and contains a condensed version of this guide for quick in-app reference.
+For the Low Battery table, when sorted by Battery %, devices at the same battery level are secondarily sorted by Device Name.
 
 ---
 
 ## Typical First-Time Setup Sequence
 
 1. Install the app on Hub #1 via **Apps → + Add User App**.
-2. Open the app. The four report tables appear (empty) and configuration sections are below.
-3. Expand **Hub #1**. Set a friendly label. Select devices for ON, OFF, and health monitoring.
-4. To enable clickable State cells and health Select All/Clear All on Hub #1: toggle **Show / Edit Toggle Command & Health Monitor Settings**, enter Maker API credentials for Hub #1, then use the **Hub #1 Health Device List Actions** dropdown to Load and Select All.
-5. For each remote hub: expand its section, toggle **Enable**, expand **Connection Settings**, enter IP/App ID/Token, collapse Connection Settings, then choose **⟳ Load / Reload Device List** from the Actions dropdown. After loading, use Select All actions and adjust individual selections as needed.
-6. Expand **Sort & Display Options**. Set activity threshold, sort preferences, and filtering options. Use **Hide Columns** to hide Room, Hub, and/or Last Activity columns if desired (handy on mobile).
-7. Click **Refresh Table** at the top of the page to run the first full report.
-8. Click **Done** to save.
+2. Open the app. The report area appears (empty) and configuration sections are below.
+3. Expand **Hub #1**. Set a friendly label and select all battery devices you want to monitor.
+4. For each remote hub: expand its section, toggle **Enable**, expand **Connection Settings**, enter IP / App ID / Token, collapse Connection Settings, then choose **⟳ Load / Reload Device List** from the Actions dropdown. After loading, use **✓ Select All** and deselect any devices you do not want monitored.
+5. Expand **Notification Settings**. Select your sound Pushover device(s) for the first report and your silent Pushover device(s) for subsequent reports.
+6. Expand **Report Type, Schedule & Logging**. Select the reports you want, set the daily check time, adjust thresholds to match your environment, and configure display options.
+7. Expand **Sort Options** and set default sort preferences for each table.
+8. Click **Refresh Table** at the top of the page to run the first full report.
+9. Click **Send Report Now** to verify that notifications are delivered correctly.
+10. Click **Done** to save.
 
 ---
 
 ## Maintenance
 
-**Adding devices to a remote hub's report:** Add the device in the remote hub's Maker API app, then run **⟳ Load / Reload** from the Actions dropdown. The new device will appear in the pickers.
+**Adding devices to a remote hub's report:** Add the device in the remote hub's Maker API app, then run **⟳ Load / Reload** from the Actions dropdown. The new device will appear in the picker.
 
-**Removing a device from monitoring:** Deselect it in the appropriate picker.
+**Removing a device from monitoring:** Deselect it in the appropriate device picker.
 
-**Hub goes offline:** The report shows a red warning banner for that hub and omits its devices from the tables. The remaining hubs still report normally.
+**Excluding a persistent disabled/unwanted device on a remote hub:** Enter its device ID (from its edit URL) in the **Manually excluded device IDs** field for that hub. It will no longer appear in any report.
 
-**Refresh cadence:** The tables are only updated when you click **Refresh Table** or revisit the app page. The app does not poll on a schedule.
+**Hub goes offline:** The affected hub's devices are omitted from all tables for that refresh. The remaining hubs still report normally.
+
+**Refresh cadence:** Tables update only when you click **Refresh Table**, click **Send Report Now**, or the daily scheduled check runs. The app does not poll continuously.
+
+**Adjusting thresholds to reduce noise:** If devices that report infrequently (e.g. door sensors in rarely-used areas) generate unwanted Last Battery Event or Last Activity entries, increase the corresponding interval threshold (e.g. from 24 hours to 72 hours) in the Report Type, Schedule & Logging section.
