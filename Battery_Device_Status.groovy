@@ -27,7 +27,7 @@ FEATURES:
 */
 
 definition(
-    name:          "Battery Device Status 1.34",
+    name:          "Battery Device Status 1.35",
     namespace:     "John Land",
     author:        "John Land via ChatGPT",
     description:   "Battery Device Status with battery %, offline/low battery reporting, last activity, configurable sort options, multi-hub support",
@@ -265,7 +265,6 @@ def mainPage() {
             input "lowBatteryLevel", "number", title:"Low battery warning level (%)", defaultValue:80, required:true
             input "criticalBatteryLevel", "number", title:"Critically low battery level (%)", defaultValue:60, required:true
             input "showSectionDetails", "bool", title:"Show extra details in section headers?", defaultValue:true
-            input "enableLogging", "bool", title:"Enable debug logging?", defaultValue:false
             input "includeNeverRecent", "bool",
                 title:"Include devices with a 'Never' battery event in the Last Battery Event report?",
                 description:"If enabled, devices that have never reported a battery event will be shown in the Last Battery Event report.",
@@ -273,6 +272,10 @@ def mainPage() {
             input "excludeVirtual", "bool",
                 title:"Exclude virtual devices from all reports?",
                 defaultValue:false
+            input "hideHubColumn", "bool",
+                title:"Hide the Hub column in all report tables? (Not needed when only one hub is being scanned)",
+                defaultValue:false
+            input "enableLogging", "bool", title:"Enable debug logging?", defaultValue:false
         }
 
         // ── Sort Options ───────────────────────────────────────────────────────
@@ -309,6 +312,39 @@ def mainPage() {
             input "sortBy_activity", "enum", title:"Sort by", options:["lastActivity":"Last Activity Time","displayName":"Device Name","level":"Battery %"], defaultValue:"lastActivity", submitOnChange:true
             input "sortOrder_activity", "enum", title:"Order", options:["asc":"Ascending","desc":"Descending"], defaultValue:"desc", submitOnChange:true
             paragraph("<hr>")
+        }
+        // ── Notes ─────────────────────────────────────────────────────────────
+        section(hideable:true, hidden:true, title:"Notes") {
+            paragraph(
+                "<b>Report Tables</b><br>" +
+                "Up to five report tables can be enabled independently via <i>Report Type, Schedule &amp; Logging</i>:<br>" +
+                "&bull; <b>Offline Devices</b> — devices currently reporting OFFLINE, INACTIVE, or NOT PRESENT.<br>" +
+                "&bull; <b>Low Battery Devices</b> — devices at or below the configured low battery warning level; critically low devices shown in red.<br>" +
+                "&bull; <b>Last Battery Event</b> — devices that have not reported a battery attribute event within the configured interval. Checks the <code>lastBatteryReport</code> driver attribute first, then falls back to the event log.<br>" +
+                "&bull; <b>Last Event (any type)</b> — devices that have not reported any event within the configured interval.<br>" +
+                "&bull; <b>Last Activity</b> — devices whose last recorded hub activity exceeds the configured interval.<br>" +
+                "<br>" +
+                "<b>Multi-Hub Support</b><br>" +
+                "Hubs #2 and #3 are queried via their Maker API on every refresh. Install Maker API on each remote hub, expose the desired battery devices, then enter the IP address, App ID, and Access Token in the hub's section and run <i>⟳ Load / Reload Device List</i>. " +
+                "Disabled remote devices cannot be filtered automatically; deselect them in the device picker or enter their device IDs in <i>Manually excluded device IDs</i> to permanently suppress them from all reports.<br>" +
+                "<br>" +
+                "<b>Scheduling &amp; Notifications</b><br>" +
+                "Reports run automatically once daily at the configured <i>Daily check time</i> and are sent to the configured notification devices. Use <i>Send Report Now</i> for an immediate on-demand send. " +
+                "The first report goes to the <i>Sound</i> notification device(s); subsequent reports go to the <i>Silent</i> device(s). Reports with no flagged devices produce no notification. Messages are staggered 5 seconds apart to avoid delivery collisions.<br>" +
+                "<br>" +
+                "<b>Table Features</b><br>" +
+                "&bull; Click any yellow column header to re-sort that table interactively (▲ ascending / ▼ descending). [Never] entries always sort to the end.<br>" +
+                "&bull; Interactive sorting is temporary; the saved default sort (also used for notifications) is configured in <i>Sort Options</i>.<br>" +
+                "&bull; Device names are clickable links to their hub's device edit page.<br>" +
+                "&bull; After each manual refresh, a scan time breakdown appears next to the <i>Last run</i> timestamp (e.g. <i>Scan time: 0:03 [Battery:0.8s, Offline:0.1s…]</i>). Scan time is not shown after scheduled runs.<br>" +
+                "<br>" +
+                "<b>Display &amp; Behavior Options</b> <i>(in Report Type, Schedule &amp; Logging)</i><br>" +
+                "&bull; <b>Show extra details in section headers</b> — appends current threshold values to collapsed section headers for at-a-glance review without expanding each section.<br>" +
+                "&bull; <b>Include devices with \'Never\' battery event</b> — when enabled, devices that have never reported a battery event appear in the Last Battery Event table; when disabled (default) they are suppressed to reduce clutter.<br>" +
+                "&bull; <b>Exclude virtual devices</b> — omits virtual devices from all tables and notification output. Detected by driver type name containing \"virtual\" or device name starting with \"VD \". Applies to local and remote hubs.<br>" +
+                "&bull; <b>Hide Hub column</b> — removes the Hub column from all tables and notification output. Recommended when only one hub is being monitored.<br>" +
+                "&bull; <b>Enable debug logging</b> — writes per-device detail to the Hubitat log during each refresh. Disable when not troubleshooting."
+            )
         }
     }
 }
@@ -733,13 +769,14 @@ private Map generateReport(String type) {
         
         def sortClass = (sortOrderVal == "desc") ? "sort-desc" : "sort-asc"
         
+        def hideHub = settings["hideHubColumn"] ?: false
         tableHtml = "<table id='${tableId}' class='battery-table' border='1' cellpadding='4' cellspacing='0' style='border-collapse:collapse;width:100%'><thead><tr>"
 		def col1Header = (type == "battery") ? "Last Battery Event Time" : "Last Event Time"
 		tableHtml += "<th onclick='sortBatteryTable(\"${tableId}\", 0)' class='${sortColIndex == 0 ? sortClass : ""}' style='width:210px;'>${col1Header}</th>"
         tableHtml += "<th onclick='sortBatteryTable(\"${tableId}\", 1)' class='${sortColIndex == 1 ? sortClass : ""}' style='width:100px;'>Battery %</th>"
         tableHtml += "<th onclick='sortBatteryTable(\"${tableId}\", 2)' class='${sortColIndex == 2 ? sortClass : ""}'>Device Name</th>"
         if (type=="any") tableHtml += "<th onclick='sortBatteryTable(\"${tableId}\", 3)' class='${sortColIndex == 3 ? sortClass : ""}'>Event Description</th>"
-        tableHtml += "<th onclick='sortBatteryTable(\"${tableId}\", ${type=='any' ? 4 : 3})' style='width:120px;'>Hub</th>"
+        if (!hideHub) tableHtml += "<th onclick='sortBatteryTable(\"${tableId}\", ${type=='any' ? 4 : 3})' style='width:120px;'>Hub</th>"
         tableHtml += "</tr></thead><tbody>"
 
         reportList.each { it ->
@@ -748,7 +785,7 @@ private Map generateReport(String type) {
             tableHtml += "<tr>"
             tableHtml += "<td data-sort='${it.lastDate?.time ?: 99999999999999}'>${it.lastStrUI}</td><td>${it.level}%</td><td><a href='${devLink}' target='_blank'>${devName}</a></td>"
             if (type=="any") tableHtml += "<td>${it.lastEventStr}</td>"
-            tableHtml += "<td>${it.hubLabel ?: ''}</td>"
+            if (!hideHub) tableHtml += "<td>${it.hubLabel ?: ''}</td>"
             tableHtml += "</tr>"
         }
         tableHtml += "</tbody></table>"
@@ -759,7 +796,7 @@ private Map generateReport(String type) {
 		def col1HeaderPlain = (type == "battery") ? "Last Battery Event Time" : "Last Event Time"
 		def header = "${col1HeaderPlain}            Battery %   Device Name"
         if (type=="any") header += "   Event Description"
-        header += "          Hub"
+        if (!hideHub) header += "          Hub"
 
         rows << header
         rows << "-" * header.size()
@@ -768,7 +805,7 @@ private Map generateReport(String type) {
             def devName = it.device ? it.device.displayName : it.displayName
             def row = "${it.lastStrNote}   ${it.level.toString()}%        ${devName}"
             if (type=="any") row += "   ${it.lastEventStr}"
-            row += "   ${it.hubLabel ?: ''}"
+            if (!hideHub) row += "   ${it.hubLabel ?: ''}"
             rows << row
         }
     }
@@ -842,11 +879,12 @@ private Map generateLowBatteryTable(String type = "low") {
     def sortClass = (sortOrderVal == "desc") ? "sort-desc" : "sort-asc"
 
     def tableId = "table_${type}"
+    def hideHub = settings["hideHubColumn"] ?: false
     def tableHtml = "${summaryText}<br><br>"
     tableHtml += "<table id='${tableId}' class='battery-table' style='border-collapse:collapse;width:100%;border:1px solid black;' cellpadding='4' cellspacing='0'><thead><tr>"
     tableHtml += "<th onclick='sortBatteryTable(\"${tableId}\", 0)' class='${sortColIndex == 0 ? sortClass : ""}' style='border:1px solid black;width:100px;'>Battery %</th>"
     tableHtml += "<th onclick='sortBatteryTable(\"${tableId}\", 1)' class='${sortColIndex == 1 ? sortClass : ""}' style='border:1px solid black;'>Device Name</th>"
-    tableHtml += "<th onclick='sortBatteryTable(\"${tableId}\", 2)' style='border:1px solid black;width:120px;'>Hub</th>"
+    if (!hideHub) tableHtml += "<th onclick='sortBatteryTable(\"${tableId}\", 2)' style='border:1px solid black;width:120px;'>Hub</th>"
     tableHtml += "</tr></thead><tbody>"
     lowList.each { it ->
         def color = it.level <= criticalBatteryLevel ? "red" : "black"
@@ -855,14 +893,14 @@ private Map generateLowBatteryTable(String type = "low") {
         tableHtml += "<tr>"
         tableHtml += "<td style='color:${color};border:1px solid black;'>${it.level}%</td>"
         tableHtml += "<td style='border:1px solid black;'><a href='${devLink}' target='_blank'>${devName}</a></td>"
-        tableHtml += "<td style='border:1px solid black;'>${it.hubLabel ?: ''}</td>"
+        if (!hideHub) tableHtml += "<td style='border:1px solid black;'>${it.hubLabel ?: ''}</td>"
         tableHtml += "</tr>"
     }
     tableHtml += "</tbody></table>"
 
     def plainRows = lowList.collect { it ->
         def devName = it.device ? it.device.displayName : it.displayName
-        "${it.level}%   ${devName}   ${it.hubLabel ?: ''}"
+        hideHub ? "${it.level}%   ${devName}" : "${it.level}%   ${devName}   ${it.hubLabel ?: ''}"
     }
     def plainMsg = "${summaryText}\n\n" + plainRows.join("\n")
     return [label:"Low Battery", html: tableHtml, plain: plainMsg]
@@ -950,13 +988,14 @@ private Map generateActivityTable(String type = "activity") {
 
     // Build HTML table
     def tableId = "table_${type}"
+    def hideHub = settings["hideHubColumn"] ?: false
     def tableHtml = "${summaryText}<br><br>"
     if (overdueCount > 0) {
         tableHtml += "<table id='${tableId}' class='battery-table' style='border-collapse:collapse;width:100%;border:1px solid black;' cellpadding='4' cellspacing='0'><thead><tr>"
         tableHtml += "<th onclick='sortBatteryTable(\"${tableId}\", 0)' class='${sortColIndex == 0 ? sortClass : ""}' style='border:1px solid black;width:210px;'>Last Activity</th>"
         tableHtml += "<th onclick='sortBatteryTable(\"${tableId}\", 1)' class='${sortColIndex == 1 ? sortClass : ""}' style='border:1px solid black;width:100px;'>Battery %</th>"
         tableHtml += "<th onclick='sortBatteryTable(\"${tableId}\", 2)' class='${sortColIndex == 2 ? sortClass : ""}' style='border:1px solid black;'>Device Name</th>"
-        tableHtml += "<th onclick='sortBatteryTable(\"${tableId}\", 3)' style='border:1px solid black;width:120px;'>Hub</th>"
+        if (!hideHub) tableHtml += "<th onclick='sortBatteryTable(\"${tableId}\", 3)' style='border:1px solid black;width:120px;'>Hub</th>"
         tableHtml += "</tr></thead><tbody>"
         reportList.each { it ->
             def devName = it.device ? it.device.displayName : it.displayName
@@ -965,7 +1004,7 @@ private Map generateActivityTable(String type = "activity") {
             tableHtml += "<td style='border:1px solid black;' data-sort='${it.lastActivity?.time ?: 99999999999999}'>${it.lastStrUI}</td>"
             tableHtml += "<td style='border:1px solid black;'>${it.level}%</td>"
             tableHtml += "<td style='border:1px solid black;'><a href='${devLink}' target='_blank'>${devName}</a></td>"
-            tableHtml += "<td style='border:1px solid black;'>${it.hubLabel ?: ''}</td>"
+            if (!hideHub) tableHtml += "<td style='border:1px solid black;'>${it.hubLabel ?: ''}</td>"
             tableHtml += "</tr>"
         }
         tableHtml += "</tbody></table>"
@@ -976,7 +1015,7 @@ private Map generateActivityTable(String type = "activity") {
     if (overdueCount > 0) {
         plainRows = reportList.collect { row ->
             def devName = row.device ? row.device.displayName : row.displayName
-            "${row.lastStrNote}   ${row.level}%   ${devName}   ${row.hubLabel ?: ''}"
+            hideHub ? "${row.lastStrNote}   ${row.level}%   ${devName}" : "${row.lastStrNote}   ${row.level}%   ${devName}   ${row.hubLabel ?: ''}"
         }
     }
     def plainMsg = "${summaryText}\n\n" + (plainRows ? plainRows.join("\n") : "")
